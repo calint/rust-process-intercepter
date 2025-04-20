@@ -70,7 +70,7 @@ fn main() -> io::Result<()> {
         log_file.write_all(&[byte])?;
         log_file.flush()?;
 
-        // forward to process
+        // forward to child
         child_stdin.write_all(&[byte])?;
         child_stdin.flush()?;
     }
