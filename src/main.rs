@@ -5,6 +5,9 @@ use std::os::unix::io::AsRawFd;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
+
+const SLEEP_WHEN_NO_INPUT: u64 = 10;
 
 fn main() -> io::Result<()> {
     // get command arguments
@@ -51,7 +54,10 @@ fn main() -> io::Result<()> {
         loop {
             // translate from terminal to serial
             match get_byte_non_blocking() {
-                -1 => continue,
+                -1 => {
+                    thread::sleep(Duration::from_millis(SLEEP_WHEN_NO_INPUT));
+                    continue;
+                }
                 0x0a => tx.send(0x0d).expect("send"), // carriage return
                 0x08 => tx.send(0x7f).expect("send"), // backspace
                 byte => tx.send(byte as u8).expect("send"),
