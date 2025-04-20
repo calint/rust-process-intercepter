@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-const SLEEP_WHEN_NO_INPUT: u64 = 10;
+const SLEEP_WHEN_NO_INPUT_MS: u64 = 10;
 
 fn main() -> io::Result<()> {
     // get command arguments
@@ -55,7 +55,7 @@ fn main() -> io::Result<()> {
             // translate from terminal to serial
             match get_byte_non_blocking() {
                 -1 => {
-                    thread::sleep(Duration::from_millis(SLEEP_WHEN_NO_INPUT));
+                    thread::sleep(Duration::from_millis(SLEEP_WHEN_NO_INPUT_MS));
                     continue;
                 }
                 0x0a => tx.send(0x0d).expect("send"), // carriage return
