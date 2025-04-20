@@ -7,14 +7,14 @@ use std::sync::mpsc;
 use std::thread;
 
 fn main() -> io::Result<()> {
-    // Get command arguments
+    // get command arguments
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <command> [args...]", args[0]);
         return Ok(());
     }
 
-    // Extract command and arguments
+    // extract command and arguments
     let command = &args[1];
     let command_args = if args.len() > 2 {
         args[2..].to_vec()
@@ -22,14 +22,14 @@ fn main() -> io::Result<()> {
         vec![]
     };
 
-    // Open log file
+    // open log file
     let mut log_file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open("input_log.bin")?;
 
-    // Spawn child process
+    // spawn child process
     let mut child = Command::new(command)
         .args(&command_args)
         .stdin(Stdio::piped())
@@ -37,40 +37,39 @@ fn main() -> io::Result<()> {
         .stderr(Stdio::inherit())
         .spawn()?;
 
-    let stdin = child.stdin.take().expect("Failed to open stdin");
+    // take stdin to child
+    let mut child_stdin = child.stdin.take().expect("stdin");
 
+    // setup terminal for non-blocking, no echo
     setup_terminal();
 
-    // Create a channel for forwarding input
+    // create a channel for forwarding input
     let (tx, rx) = mpsc::channel();
 
-    // Thread for reading raw binary input
+    // thread for reading raw binary input and translating to serial
     thread::spawn(move || {
         loop {
-            // Try to read one character using getchar
-            let c = get_byte_non_blocking();
-            if c != -1 {
-                // We got a character, send it immediately
-                tx.send(c as u8).expect("Failed to send through channel");
-            }
-            // If c == -1, it means no data available, just continue the loop
+            // translate from terminal to serial
+            match get_byte_non_blocking() {
+                -1 => continue,
+                0x0a => tx.send(0x0d).expect("send"), // carriage return
+                0x08 => tx.send(0x7f).expect("send"), // backspace
+                byte => tx.send(byte as u8).expect("send"),
+            };
         }
     });
 
-    // Main thread handles receiving input and forwarding
-    let mut process_stdin = stdin;
-
     for byte in rx {
-        // Log to binary file
+        // log to binary file
         log_file.write_all(&[byte])?;
         log_file.flush()?;
 
-        // Forward to process
-        process_stdin.write_all(&[byte])?;
-        process_stdin.flush()?;
+        // forward to process
+        child_stdin.write_all(&[byte])?;
+        child_stdin.flush()?;
     }
 
-    // Wait for the child process to complete
+    // wait for the child process to complete
     let status = child.wait()?;
     println!("\nProcess exited with status: {}", status);
 
