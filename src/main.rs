@@ -1,9 +1,8 @@
 use std::env;
 use std::fs::OpenOptions;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -36,20 +35,18 @@ fn main() -> io::Result<()> {
     let mut child = Command::new(command)
         .args(&command_args)
         .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()?;
 
     // take stdin to child
     let mut child_stdin = child.stdin.take().expect("stdin");
+    let mut child_stdout = child.stdout.take().expect("stdout");
 
     // setup terminal for non-blocking, no echo
     setup_terminal();
 
-    // create a channel for forwarding input
-    let (tx, rx) = mpsc::channel();
-
-    // thread for reading raw binary input and translating to serial
+    // thread for reading raw binary input and translating to serial and forwarding to child stdin and log file
     thread::spawn(move || {
         loop {
             // translate from terminal to serial
@@ -58,22 +55,50 @@ fn main() -> io::Result<()> {
                     thread::sleep(Duration::from_millis(SLEEP_WHEN_NO_INPUT_MS));
                     continue;
                 }
-                0x0a => tx.send(0x0d).expect("send"), // carriage return
-                0x08 => tx.send(0x7f).expect("send"), // backspace
-                byte => tx.send(byte as u8).expect("send"),
+                0x0a => {
+                    // carriage return
+                    let slice = &[0x0d];
+                    log_file.write_all(slice).expect("write to log");
+                    child_stdin.write_all(slice).expect("write to child");
+                }
+                0x08 => {
+                    // backspace
+                    let slice = &[0x7f];
+                    log_file.write_all(slice).expect("write to log");
+                    child_stdin.write_all(slice).expect("write to child");
+                }
+                byte => {
+                    let slice = &[byte as u8];
+                    log_file.write_all(slice).expect("write to log");
+                    child_stdin.write_all(slice).expect("write to child");
+                }
             };
         }
     });
 
-    for byte in rx {
-        // log to binary file
-        log_file.write_all(&[byte])?;
-        log_file.flush()?;
-
-        // forward to child
-        child_stdin.write_all(&[byte])?;
-        child_stdin.flush()?;
-    }
+    // thread for reading child stdout and translating to console and forwarding to stdout
+    thread::spawn(move || {
+        loop {
+            let mut buf = [0_u8; 1];
+            // translate from terminal to serial
+            child_stdout
+                .read_exact(&mut buf)
+                .expect("read from child stdout");
+            match buf[0] {
+                0x7f => {
+                    // backspace
+                    let mut stdout = io::stdout().lock();
+                    stdout.write_all(b"\x08 \x08").expect("write to stdout");
+                    stdout.flush().expect("flush stdout");
+                }
+                _ => {
+                    let mut stdout = io::stdout().lock();
+                    stdout.write_all(&buf).expect("write to stdout");
+                    stdout.flush().expect("flush stdout");
+                }
+            };
+        }
+    });
 
     // wait for the child process to complete
     let status = child.wait()?;
