@@ -46,7 +46,7 @@ fn main() -> io::Result<()> {
     // setup terminal for non-blocking, no echo
     setup_terminal();
 
-    // thread for reading raw binary input and translating to serial and forwarding to child stdin and log file
+    // thread for reading raw binary input, translate to serial then forward to child stdin and log file
     thread::spawn(move || {
         loop {
             // translate from terminal to serial
@@ -76,7 +76,7 @@ fn main() -> io::Result<()> {
         }
     });
 
-    // thread for reading child stdout and translating to console and forwarding to stdout
+    // thread for reading child stdout, translate to console and forward to stdout
     thread::spawn(move || {
         loop {
             let mut buf = [0_u8; 1];
